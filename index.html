@@ -45,6 +45,36 @@
     font-size: 12px;
     color: #cdd6e6;
   }
+  .controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    font-size: 14px;
+    color: #aeb7c8;
+  }
+  .controls .label { letter-spacing: .3px; }
+  .controls button {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    border: 1px solid #333c4e;
+    background: linear-gradient(#2a3140, #212734);
+    color: #e7ebf3;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background .08s ease, opacity .08s ease;
+  }
+  .controls button:hover:not(:disabled) { background: linear-gradient(#323b4d, #262d3b); }
+  .controls button:disabled { opacity: .35; cursor: default; }
+  .controls .readout {
+    min-width: 30px;
+    text-align: center;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 16px;
+    font-weight: 600;
+    color: #e7ebf3;
+  }
   .board {
     display: flex;
     flex-direction: column;
@@ -113,6 +143,12 @@
     <h1>Wicki–Hayden Piano</h1>
     <p class="sub">Play with your keyboard. Right = whole tone · up-right = a fifth. <kbd>Z</kbd> = C4.</p>
   </header>
+  <div class="controls">
+    <span class="label">Octave</span>
+    <button id="octDown" aria-label="Octave down">−</button>
+    <span class="readout" id="octReadout">0</span>
+    <button id="octUp" aria-label="Octave up">+</button>
+  </div>
   <div class="board" id="board"></div>
 
 <script>
@@ -181,7 +217,7 @@
     if (active.has(code)) return;
     const el = keyEls.get(code);
     if (!el) return;
-    const freq = midiToFreq(Number(el.dataset.midi));
+    const freq = midiToFreq(Number(el.dataset.midi) + octaveShift * 12);
     const now = ctx.currentTime;
 
     const g = ctx.createGain();
@@ -218,7 +254,35 @@
     if (el) el.classList.remove('active');
   }
 
+  // ---- Octave shift ----
+  const OCT_MIN = -3, OCT_MAX = 2;
+  let octaveShift = 0;
+  const octReadout = document.getElementById('octReadout');
+  const octDownBtn = document.getElementById('octDown');
+  const octUpBtn = document.getElementById('octUp');
+
+  function applyShift(delta) {
+    const next = Math.max(OCT_MIN, Math.min(OCT_MAX, octaveShift + delta));
+    if (next === octaveShift) return;
+    octaveShift = next;
+    for (const el of keyEls.values()) {
+      const midi = Number(el.dataset.midi) + octaveShift * 12;
+      el.querySelector('.oct').textContent = Math.floor(midi / 12) - 1;
+    }
+    octReadout.textContent = octaveShift > 0 ? `+${octaveShift}` : `${octaveShift}`;
+    octDownBtn.disabled = octaveShift === OCT_MIN;
+    octUpBtn.disabled = octaveShift === OCT_MAX;
+  }
+
+  octDownBtn.addEventListener('click', () => applyShift(-1));
+  octUpBtn.addEventListener('click', () => applyShift(1));
+
   window.addEventListener('keydown', (e) => {
+    if (e.code === 'ArrowUp' || e.code === 'ArrowDown') {
+      e.preventDefault();
+      if (!e.repeat) applyShift(e.code === 'ArrowUp' ? 1 : -1);
+      return;
+    }
     if (e.repeat) return;
     if (keyEls.has(e.code)) { e.preventDefault(); noteOn(e.code); }
   });
