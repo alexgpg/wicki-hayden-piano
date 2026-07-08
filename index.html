@@ -136,6 +136,80 @@
     box-shadow: 0 0 20px rgba(96,140,255,.65);
   }
   .key.active .qwerty, .key.active .oct { opacity: .85; }
+
+  .help {
+    width: min(760px, 92vw);
+    background: linear-gradient(#141821, #0e121a);
+    border: 1px solid #262d3a;
+    border-radius: 14px;
+    padding: 2px 20px 18px;
+  }
+  .help summary {
+    cursor: pointer;
+    list-style: none;
+    padding: 14px 0 4px;
+    font-size: 15px;
+    font-weight: 600;
+    color: #cdd6e6;
+    user-select: none;
+  }
+  .help summary::-webkit-details-marker { display: none; }
+  .help summary::before {
+    content: '▸';
+    display: inline-block;
+    margin-right: 8px;
+    color: #7f8aa0;
+    transition: transform .15s ease;
+  }
+  .help[open] summary::before { transform: rotate(90deg); }
+  .help .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: center;
+    font-size: 12px;
+    color: #8791a5;
+    margin: 6px 0 4px;
+  }
+  .help .legend .dot {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: 6px;
+    vertical-align: middle;
+  }
+  .group-title {
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: .8px;
+    color: #7f8aa0;
+    margin: 16px 0 8px;
+  }
+  .cards { display: flex; flex-wrap: wrap; gap: 12px; }
+  .card {
+    width: 120px;
+    background: #1b2029;
+    border: 1px solid #2a313f;
+    border-radius: 10px;
+    padding: 10px 8px 8px;
+    text-align: center;
+  }
+  .card svg { width: 100%; height: auto; display: block; }
+  .card .name { font-size: 13px; font-weight: 600; margin-top: 6px; color: #e7ebf3; }
+  .card .ex {
+    margin-top: 6px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 11px;
+    color: #9aa4b8;
+  }
+  .card .ex span {
+    background: #232a38;
+    border: 1px solid #333c4e;
+    border-radius: 4px;
+    padding: 1px 5px;
+    color: #cdd6e6;
+  }
 </style>
 </head>
 <body>
@@ -150,6 +224,16 @@
     <button id="octUp" aria-label="Octave up">+</button>
   </div>
   <div class="board" id="board"></div>
+
+  <details class="help" open>
+    <summary>Chord &amp; interval shapes</summary>
+    <div class="legend">
+      <span><span class="dot" style="background:#ffb454"></span>root</span>
+      <span><span class="dot" style="background:#6c9bff"></span>added note</span>
+      <span>The same shape plays the same chord anywhere on the board.</span>
+    </div>
+    <div id="helpBody"></div>
+  </details>
 
 <script>
   const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
@@ -291,6 +375,71 @@
   });
   // Release everything if focus is lost mid-hold.
   window.addEventListener('blur', () => { for (const code of [...active.keys()]) noteOff(code); });
+
+  // ---- Help: chord & interval shapes ----
+  // Positions are relative to the root as (dr, di): dr = rows up, di = keys right.
+  // On this board a whole tone is +1 di, and each row up is a perfect fifth.
+  (function buildHelp() {
+    const CX = 22, CY = 20, STAGGER = 11, PAD = 10, R_DOT = 3.2, R_HL = 6;
+    const pos = (dr, di) => [PAD + (di + 2) * CX - dr * STAGGER + 2 * STAGGER, PAD + (2 - dr) * CY];
+
+    function diagram(notes) {
+      const k = (dr, di) => dr + ',' + di;
+      const taken = new Set(notes.map(n => k(n.dr, n.di)));
+      const root = notes.find(n => n.role === 'root');
+      const [rx, ry] = pos(root.dr, root.di);
+      let bg = '', lines = '', hl = '';
+      for (let dr = 0; dr <= 2; dr++)
+        for (let di = -2; di <= 2; di++)
+          if (!taken.has(k(dr, di))) {
+            const [x, y] = pos(dr, di);
+            bg += `<circle cx="${x}" cy="${y}" r="${R_DOT}" fill="#333c4e"/>`;
+          }
+      for (const n of notes) if (n.role !== 'root') {
+        const [x, y] = pos(n.dr, n.di);
+        lines += `<line x1="${rx}" y1="${ry}" x2="${x}" y2="${y}" stroke="#5f6b80" stroke-width="2" stroke-linecap="round"/>`;
+      }
+      for (const n of notes) {
+        const [x, y] = pos(n.dr, n.di);
+        hl += `<circle cx="${x}" cy="${y}" r="${R_HL}" fill="${n.role === 'root' ? '#ffb454' : '#6c9bff'}"/>`;
+      }
+      return `<svg viewBox="0 0 130 60">${bg}${lines}${hl}</svg>`;
+    }
+
+    const R = { dr: 0, di: 0, role: 'root' };
+    const GROUPS = [
+      { title: 'Intervals', sep: '→', items: [
+        { name: 'Whole tone',  keys: ['Z', 'X'], notes: [R, { dr: 0, di: 1, role: 'note' }] },
+        { name: 'Major 3rd',   keys: ['Z', 'C'], notes: [R, { dr: 0, di: 2, role: 'note' }] },
+        { name: 'Perfect 4th', keys: ['X', 'A'], notes: [R, { dr: 1, di: -1, role: 'note' }] },
+        { name: 'Perfect 5th', keys: ['Z', 'A'], notes: [R, { dr: 1, di: 0, role: 'note' }] },
+        { name: 'Octave',      keys: ['C', 'W'], notes: [R, { dr: 2, di: -1, role: 'note' }] },
+      ] },
+      { title: 'Chords', sep: '+', items: [
+        { name: 'Major triad', keys: ['Z', 'C', 'A'], notes: [R, { dr: 0, di: 2, role: 'note' }, { dr: 1, di: 0, role: 'note' }] },
+        { name: 'Minor triad', keys: ['C', 'A', 'D'], notes: [R, { dr: 1, di: -2, role: 'note' }, { dr: 1, di: 0, role: 'note' }] },
+      ] },
+    ];
+
+    const body = document.getElementById('helpBody');
+    for (const g of GROUPS) {
+      const title = document.createElement('div');
+      title.className = 'group-title';
+      title.textContent = g.title;
+      body.appendChild(title);
+      const cards = document.createElement('div');
+      cards.className = 'cards';
+      for (const it of g.items) {
+        const card = document.createElement('div');
+        card.className = 'card';
+        card.innerHTML = diagram(it.notes) +
+          `<div class="name">${it.name}</div>` +
+          `<div class="ex">${it.keys.map(x => `<span>${x}</span>`).join(' ' + g.sep + ' ')}</div>`;
+        cards.appendChild(card);
+      }
+      body.appendChild(cards);
+    }
+  })();
 </script>
 </body>
 </html>
