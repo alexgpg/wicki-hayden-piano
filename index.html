@@ -48,12 +48,14 @@
   .controls {
     display: flex;
     align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
     gap: 12px;
     font-size: 14px;
     color: #aeb7c8;
   }
   .controls .label { letter-spacing: .3px; }
-  .controls button {
+  .controls button:not(.chip) {
     width: 34px;
     height: 34px;
     border-radius: 8px;
@@ -65,8 +67,8 @@
     cursor: pointer;
     transition: background .08s ease, opacity .08s ease;
   }
-  .controls button:hover:not(:disabled) { background: linear-gradient(#323b4d, #262d3b); }
-  .controls button:disabled { opacity: .35; cursor: default; }
+  .controls button:not(.chip):hover:not(:disabled) { background: linear-gradient(#323b4d, #262d3b); }
+  .controls button:not(.chip):disabled { opacity: .35; cursor: default; }
   .controls .readout {
     min-width: 30px;
     text-align: center;
@@ -75,6 +77,26 @@
     font-weight: 600;
     color: #e7ebf3;
   }
+  .chip {
+    padding: 6px 11px;
+    border-radius: 8px;
+    border: 1px solid #333c4e;
+    background: linear-gradient(#2a3140, #212734);
+    color: #cdd6e6;
+    font-size: 12px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: nowrap;
+    flex: none;
+    cursor: pointer;
+    transition: background .08s ease, border-color .08s ease, color .08s ease;
+  }
+  .chip:hover { background: linear-gradient(#323b4d, #262d3b); }
+  .chip.active {
+    background: linear-gradient(#6c9bff, #3f6fe0);
+    border-color: #a6c2ff;
+    color: #fff;
+  }
+  .controls .hint { font-size: 12px; color: #7f8aa0; }
   .board {
     display: flex;
     flex-direction: column;
@@ -223,6 +245,14 @@
     <span class="readout" id="octReadout">0</span>
     <button id="octUp" aria-label="Octave up">+</button>
   </div>
+  <div class="controls">
+    <span class="label">Chord</span>
+    <button class="chip" data-code="F1">F1 · maj</button>
+    <button class="chip" data-code="F2">F2 · min</button>
+    <button class="chip" data-code="F3">F3 · 7</button>
+    <button class="chip" data-code="F4">F4 · sus4</button>
+    <span class="hint">hold (or click) + play a key</span>
+  </div>
   <div class="board" id="board"></div>
 
   <details class="help" open>
@@ -282,7 +312,15 @@
 
   // ---- Audio ----
   let ctx, master;
-  const active = new Map(); // code -> { o1, o2, g }
+  const active = new Map(); // code -> array of voices ({ o1, o2, g })
+
+  // Chord-type modifiers: hold an F-key (or click a chip) to pick a type,
+  // then any note key plays that chord rooted on it. Intervals in semitones.
+  const CHORDS = { major: [0, 4, 7], minor: [0, 3, 7], dom7: [0, 4, 7, 10], sus4: [0, 5, 7] };
+  const CHORD_KEYS = { F1: 'major', F2: 'minor', F3: 'dom7', F4: 'sus4' };
+  const heldMods = []; // types held via F-keys, in press order
+  let latched = null;  // type latched via chip click
+  const activeType = () => heldMods.length ? heldMods[heldMods.length - 1] : latched;
 
   function initAudio() {
     if (ctx) { if (ctx.state === 'suspended') ctx.resume(); return; }
@@ -296,18 +334,12 @@
 
   const midiToFreq = (m) => 440 * Math.pow(2, (m - 69) / 12);
 
-  function noteOn(code) {
-    initAudio();
-    if (active.has(code)) return;
-    const el = keyEls.get(code);
-    if (!el) return;
-    const freq = midiToFreq(Number(el.dataset.midi) + octaveShift * 12);
+  function startVoice(freq, peak) {
     const now = ctx.currentTime;
-
     const g = ctx.createGain();
     g.gain.setValueAtTime(0.0001, now);
-    g.gain.exponentialRampToValueAtTime(0.6, now + 0.012); // attack
-    g.gain.exponentialRampToValueAtTime(0.35, now + 0.18); // decay → sustain
+    g.gain.exponentialRampToValueAtTime(peak, now + 0.012);        // attack
+    g.gain.exponentialRampToValueAtTime(peak * 0.58, now + 0.18);  // decay → sustain
     g.connect(master);
 
     const o1 = ctx.createOscillator();
@@ -319,21 +351,36 @@
     o2.detune.value = -4; // subtle warmth
     o1.connect(g); o2.connect(g);
     o1.start(); o2.start();
+    return { o1, o2, g };
+  }
 
-    active.set(code, { o1, o2, g });
+  function stopVoice(v) {
+    const now = ctx.currentTime;
+    v.g.gain.cancelScheduledValues(now);
+    v.g.gain.setValueAtTime(Math.max(v.g.gain.value, 0.0001), now);
+    v.g.gain.exponentialRampToValueAtTime(0.0001, now + 0.25); // release
+    v.o1.stop(now + 0.3);
+    v.o2.stop(now + 0.3);
+  }
+
+  function noteOn(code) {
+    initAudio();
+    if (active.has(code)) return;
+    const el = keyEls.get(code);
+    if (!el) return;
+    const base = Number(el.dataset.midi) + octaveShift * 12;
+    const intervals = CHORDS[activeType()] || [0];
+    const peak = intervals.length > 1 ? 0.42 : 0.6; // ease level so chords don't spike
+    const voices = intervals.map((iv) => startVoice(midiToFreq(base + iv), peak));
+    active.set(code, voices);
     el.classList.add('active');
   }
 
   function noteOff(code) {
-    const n = active.get(code);
-    if (!n) return;
+    const voices = active.get(code);
+    if (!voices) return;
     active.delete(code);
-    const now = ctx.currentTime;
-    n.g.gain.cancelScheduledValues(now);
-    n.g.gain.setValueAtTime(Math.max(n.g.gain.value, 0.0001), now);
-    n.g.gain.exponentialRampToValueAtTime(0.0001, now + 0.25); // release
-    n.o1.stop(now + 0.3);
-    n.o2.stop(now + 0.3);
+    voices.forEach(stopVoice);
     const el = keyEls.get(code);
     if (el) el.classList.remove('active');
   }
@@ -361,16 +408,48 @@
   octDownBtn.addEventListener('click', () => applyShift(-1));
   octUpBtn.addEventListener('click', () => applyShift(1));
 
+  // ---- Chord modifier wiring ----
+  const chipEls = {};
+  document.querySelectorAll('.chip').forEach((chip) => {
+    chipEls[chip.dataset.code] = chip;
+    chip.addEventListener('click', () => {
+      const type = CHORD_KEYS[chip.dataset.code];
+      latched = latched === type ? null : type; // click-to-latch toggle
+      updateChordUI();
+    });
+  });
+
+  function updateChordUI() {
+    const t = activeType();
+    for (const code in chipEls) chipEls[code].classList.toggle('active', CHORD_KEYS[code] === t);
+  }
+  function pressMod(code) {
+    const type = CHORD_KEYS[code];
+    if (!heldMods.includes(type)) heldMods.push(type);
+    updateChordUI();
+  }
+  function releaseMod(code) {
+    const i = heldMods.indexOf(CHORD_KEYS[code]);
+    if (i !== -1) heldMods.splice(i, 1);
+    updateChordUI();
+  }
+
   window.addEventListener('keydown', (e) => {
     if (e.code === 'ArrowUp' || e.code === 'ArrowDown') {
       e.preventDefault();
       if (!e.repeat) applyShift(e.code === 'ArrowUp' ? 1 : -1);
       return;
     }
+    if (CHORD_KEYS[e.code]) {
+      e.preventDefault(); // suppress browser help/find on F1–F4
+      if (!e.repeat) pressMod(e.code);
+      return;
+    }
     if (e.repeat) return;
     if (keyEls.has(e.code)) { e.preventDefault(); noteOn(e.code); }
   });
   window.addEventListener('keyup', (e) => {
+    if (CHORD_KEYS[e.code]) { releaseMod(e.code); return; }
     if (keyEls.has(e.code)) noteOff(e.code);
   });
   // Release everything if focus is lost mid-hold.
