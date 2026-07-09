@@ -97,6 +97,26 @@
     color: #fff;
   }
   .controls .hint { font-size: 12px; color: #7f8aa0; }
+  .controls select {
+    background: linear-gradient(#2a3140, #212734);
+    color: #e7ebf3;
+    border: 1px solid #333c4e;
+    border-radius: 8px;
+    padding: 6px 8px;
+    font-size: 13px;
+    font-family: inherit;
+    cursor: pointer;
+  }
+  .controls select:disabled { opacity: .45; cursor: default; }
+  .controls .check {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 13px;
+    color: #aeb7c8;
+    cursor: pointer;
+  }
+  .controls .check input { accent-color: #6c9bff; cursor: pointer; }
   .board {
     display: flex;
     flex-direction: column;
@@ -253,6 +273,14 @@
     <button class="chip" data-code="F4">F4 · sus4</button>
     <span class="hint">hold (or click) + play a key</span>
   </div>
+  <div class="controls">
+    <span class="label">MIDI</span>
+    <select id="midiOut"><option value="">Off (local only)</option></select>
+    <span class="label">Ch</span>
+    <select id="midiCh"></select>
+    <label class="check"><input type="checkbox" id="localSound" checked> Local sound</label>
+    <span class="hint" id="midiStatus"></span>
+  </div>
   <div class="board" id="board"></div>
 
   <details class="help" open>
@@ -322,6 +350,13 @@
   let latched = null;  // type latched via chip click
   const activeType = () => heldMods.length ? heldMods[heldMods.length - 1] : latched;
 
+  // ---- Web MIDI output ----
+  const VELOCITY = 100; // computer keyboard has no velocity sensing
+  let midiAccess = null;
+  let midiOutput = null;  // selected MIDIOutput, or null (local only)
+  let midiChannel = 0;    // 0–15
+  let localSound = true;  // play the built-in synth
+
   function initAudio() {
     if (ctx) { if (ctx.state === 'suspended') ctx.resume(); return; }
     ctx = new (window.AudioContext || window.webkitAudioContext)();
@@ -363,24 +398,39 @@
     v.o2.stop(now + 0.3);
   }
 
+  function sendMidi(statusBase, notes) {
+    if (!midiOutput) return;
+    const status = statusBase | midiChannel;
+    const vel = statusBase === 0x90 ? VELOCITY : 0;
+    for (const n of notes) if (n >= 0 && n <= 127) midiOutput.send([status, n, vel]);
+  }
+
   function noteOn(code) {
-    initAudio();
     if (active.has(code)) return;
     const el = keyEls.get(code);
     if (!el) return;
     const base = Number(el.dataset.midi) + octaveShift * 12;
     const intervals = CHORDS[activeType()] || [0];
-    const peak = intervals.length > 1 ? 0.42 : 0.6; // ease level so chords don't spike
-    const voices = intervals.map((iv) => startVoice(midiToFreq(base + iv), peak));
-    active.set(code, voices);
+    const notes = intervals.map((iv) => base + iv);
+
+    let voices = [];
+    if (localSound) {
+      initAudio();
+      const peak = intervals.length > 1 ? 0.42 : 0.6; // ease level so chords don't spike
+      voices = notes.map((n) => startVoice(midiToFreq(n), peak));
+    }
+    sendMidi(0x90, notes);
+
+    active.set(code, { voices, notes });
     el.classList.add('active');
   }
 
   function noteOff(code) {
-    const voices = active.get(code);
-    if (!voices) return;
+    const entry = active.get(code);
+    if (!entry) return;
     active.delete(code);
-    voices.forEach(stopVoice);
+    entry.voices.forEach(stopVoice);
+    sendMidi(0x80, entry.notes);
     const el = keyEls.get(code);
     if (el) el.classList.remove('active');
   }
@@ -454,6 +504,70 @@
   });
   // Release everything if focus is lost mid-hold.
   window.addEventListener('blur', () => { for (const code of [...active.keys()]) noteOff(code); });
+
+  // ---- MIDI setup ----
+  function allNotesOff() {
+    // release notes on the CURRENTLY selected output/channel (call before switching)
+    if (!midiOutput) return;
+    for (const { notes } of active.values())
+      for (const n of notes) if (n >= 0 && n <= 127) midiOutput.send([0x80 | midiChannel, n, 0]);
+    midiOutput.send([0xB0 | midiChannel, 123, 0]); // CC 123 = all notes off (safety)
+  }
+
+  (function setupMidi() {
+    const sel = document.getElementById('midiOut');
+    const chSel = document.getElementById('midiCh');
+    const localChk = document.getElementById('localSound');
+    const status = document.getElementById('midiStatus');
+
+    for (let c = 1; c <= 16; c++) {
+      const o = document.createElement('option');
+      o.value = String(c - 1);
+      o.textContent = String(c);
+      chSel.appendChild(o);
+    }
+    chSel.value = '0';
+
+    chSel.addEventListener('change', () => { allNotesOff(); midiChannel = Number(chSel.value); });
+    localChk.addEventListener('change', () => { localSound = localChk.checked; });
+    sel.addEventListener('change', () => {
+      allNotesOff(); // release on the old port before switching
+      midiOutput = sel.value ? midiAccess.outputs.get(sel.value) : null;
+    });
+
+    if (typeof navigator.requestMIDIAccess !== 'function') {
+      status.textContent = 'Web MIDI not supported in this browser';
+      sel.disabled = chSel.disabled = true;
+      return;
+    }
+
+    function refreshOutputs() {
+      const prev = sel.value;
+      sel.length = 1; // keep the "Off (local only)" option
+      for (const out of midiAccess.outputs.values()) {
+        const o = document.createElement('option');
+        o.value = out.id;
+        o.textContent = out.name;
+        sel.appendChild(o);
+      }
+      if ([...sel.options].some((o) => o.value === prev)) {
+        sel.value = prev;
+      } else {
+        sel.value = '';
+        midiOutput = null;
+      }
+      status.textContent = midiAccess.outputs.size ? '' : 'No MIDI outputs found';
+    }
+
+    navigator.requestMIDIAccess({ sysex: false }).then((access) => {
+      midiAccess = access;
+      access.addEventListener('statechange', refreshOutputs);
+      refreshOutputs();
+    }).catch(() => {
+      status.textContent = 'MIDI access denied';
+      sel.disabled = chSel.disabled = true;
+    });
+  })();
 
   // ---- Help: chord & interval shapes ----
   // Positions are relative to the root as (dr, di): dr = rows up, di = keys right.
