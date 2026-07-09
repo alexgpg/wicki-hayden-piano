@@ -257,7 +257,7 @@
 <body>
   <header>
     <h1>Wicki–Hayden Piano</h1>
-    <p class="sub">Play with your keyboard. Right = whole tone · up-right = a fifth. <kbd>Z</kbd> = C4.</p>
+    <p class="sub">Play with your keyboard. Right = whole tone · up-left = a fourth · up-right = a fifth. <kbd>Z</kbd> = C3.</p>
   </header>
   <div class="controls">
     <span class="label">Octave</span>
@@ -300,9 +300,9 @@
   // base = semitone offset of the leftmost key from C4 (MIDI 60).
   // indent = QWERTY-style horizontal stagger, in key-units.
   const ROWS = [
-    { base: 21, indent: 0.00, keys: [['Digit1','1'],['Digit2','2'],['Digit3','3'],['Digit4','4'],['Digit5','5'],['Digit6','6'],['Digit7','7'],['Digit8','8'],['Digit9','9'],['Digit0','0'],['Minus','-'],['Equal','=']] },
-    { base: 14, indent: 0.55, keys: [['KeyQ','Q'],['KeyW','W'],['KeyE','E'],['KeyR','R'],['KeyT','T'],['KeyY','Y'],['KeyU','U'],['KeyI','I'],['KeyO','O'],['KeyP','P'],['BracketLeft','['],['BracketRight',']']] },
-    { base:  7, indent: 0.80, keys: [['KeyA','A'],['KeyS','S'],['KeyD','D'],['KeyF','F'],['KeyG','G'],['KeyH','H'],['KeyJ','J'],['KeyK','K'],['KeyL','L'],['Semicolon',';'],['Quote',"'"]] },
+    { base: 15, indent: 0.00, keys: [['Digit1','1'],['Digit2','2'],['Digit3','3'],['Digit4','4'],['Digit5','5'],['Digit6','6'],['Digit7','7'],['Digit8','8'],['Digit9','9'],['Digit0','0'],['Minus','-'],['Equal','=']] },
+    { base: 10, indent: 0.55, keys: [['KeyQ','Q'],['KeyW','W'],['KeyE','E'],['KeyR','R'],['KeyT','T'],['KeyY','Y'],['KeyU','U'],['KeyI','I'],['KeyO','O'],['KeyP','P'],['BracketLeft','['],['BracketRight',']']] },
+    { base:  5, indent: 0.80, keys: [['KeyA','A'],['KeyS','S'],['KeyD','D'],['KeyF','F'],['KeyG','G'],['KeyH','H'],['KeyJ','J'],['KeyK','K'],['KeyL','L'],['Semicolon',';'],['Quote',"'"]] },
     { base:  0, indent: 1.30, keys: [['KeyZ','Z'],['KeyX','X'],['KeyC','C'],['KeyV','V'],['KeyB','B'],['KeyN','N'],['KeyM','M'],['Comma',','],['Period','.'],['Slash','/']] },
   ];
 
@@ -314,7 +314,7 @@
     rowEl.className = 'row';
     rowEl.style.marginLeft = `calc(var(--unit) * ${row.indent})`;
     row.keys.forEach(([code, label], i) => {
-      const midi = 60 + row.base + i * 2;
+      const midi = 48 + row.base + i * 2; // 48 = C3, the bottom-left (Z) anchor
       const name = NOTE_NAMES[midi % 12];
       const octave = Math.floor(midi / 12) - 1;
       const isSharp = name.includes('#');
@@ -654,15 +654,15 @@
     const R = { dr: 0, di: 0, role: 'root' };
     const GROUPS = [
       { title: 'Intervals', sep: '→', items: [
-        { name: 'Whole tone',  keys: ['Z', 'X'], notes: [R, { dr: 0, di: 1, role: 'note' }] },
-        { name: 'Major 3rd',   keys: ['Z', 'C'], notes: [R, { dr: 0, di: 2, role: 'note' }] },
-        { name: 'Perfect 4th', keys: ['X', 'A'], notes: [R, { dr: 1, di: -1, role: 'note' }] },
-        { name: 'Perfect 5th', keys: ['Z', 'A'], notes: [R, { dr: 1, di: 0, role: 'note' }] },
-        { name: 'Octave',      keys: ['C', 'W'], notes: [R, { dr: 2, di: -1, role: 'note' }] },
+        { name: 'Whole tone',  keys: ['M', ','], notes: [R, { dr: 0, di: 1, role: 'note' }] },
+        { name: 'Major 3rd',   keys: ['M', '.'], notes: [R, { dr: 0, di: 2, role: 'note' }] },
+        { name: 'Perfect 4th', keys: ['M', 'J'], notes: [R, { dr: 1, di: 0, role: 'note' }] },
+        { name: 'Perfect 5th', keys: ['M', 'K'], notes: [R, { dr: 1, di: 1, role: 'note' }] },
+        { name: 'Octave',      keys: ['M', 'I'], notes: [R, { dr: 2, di: 1, role: 'note' }] },
       ] },
       { title: 'Chords', sep: '+', items: [
-        { name: 'Major triad', keys: ['Z', 'C', 'A'], notes: [R, { dr: 0, di: 2, role: 'note' }, { dr: 1, di: 0, role: 'note' }] },
-        { name: 'Minor triad', keys: ['C', 'A', 'D'], notes: [R, { dr: 1, di: -2, role: 'note' }, { dr: 1, di: 0, role: 'note' }] },
+        { name: 'Major triad', keys: ['M', '.', 'K'], notes: [R, { dr: 0, di: 2, role: 'note' }, { dr: 1, di: 1, role: 'note' }] },
+        { name: 'Minor triad', keys: ['M', 'H', 'K'], notes: [R, { dr: 1, di: -1, role: 'note' }, { dr: 1, di: 1, role: 'note' }] },
       ] },
     ];
 
